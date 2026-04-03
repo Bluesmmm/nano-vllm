@@ -13,6 +13,7 @@ from nanovllm.utils.loader import load_model
 
 
 class ModelRunner:
+    """封装模型加载、KV Cache 分配、prefill/decode 输入准备和 CUDA Graph 执行。"""
 
     def __init__(self, config: Config, rank: int, event: Event | list[Event]):
         self.config = config
@@ -89,6 +90,7 @@ class ModelRunner:
         return method(*args)
 
     def warmup_model(self):
+        """用虚拟序列预热 CUDA，并为后续 KV Cache 分配留下显存峰值统计。"""
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
         max_num_batched_tokens, max_model_len = self.config.max_num_batched_tokens, self.config.max_model_len
@@ -101,6 +103,7 @@ class ModelRunner:
         torch.cuda.empty_cache()
 
     def allocate_kv_cache(self):
+        """根据当前显存余量计算 KV Cache block 数，并把大块缓存切给各层 attention。"""
         config = self.config
         hf_config = config.hf_config
         free, total = torch.cuda.mem_get_info()
@@ -127,6 +130,7 @@ class ModelRunner:
         return block_tables
 
     def prepare_prefill(self, seqs: list[Sequence]):
+        """准备 prefill 输入；chunked prefill 只处理本轮 scheduled 的 token 区间。"""
         input_ids = []
         positions = []
         cu_seqlens_q = [0]
