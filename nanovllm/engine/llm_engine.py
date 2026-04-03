@@ -13,6 +13,7 @@ from nanovllm.engine.model_runner import ModelRunner
 
 
 class LLMEngine:
+    """面向用户的推理入口，负责请求入队、调度、模型执行和结果解码。"""
 
     def __init__(self, model, **kwargs):
         config_fields = {field.name for field in fields(Config)}
@@ -47,6 +48,7 @@ class LLMEngine:
         self.scheduler.add(seq)
 
     def step(self):
+        """执行一次调度步；prefill 返回正 token 数，decode 返回负序列数用于吞吐统计。"""
         seqs, is_prefill = self.scheduler.schedule()
         num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
         token_ids = self.model_runner.call("run", seqs, is_prefill)
@@ -63,6 +65,7 @@ class LLMEngine:
         sampling_params: SamplingParams | list[SamplingParams],
         use_tqdm: bool = True,
     ) -> list[str]:
+        """批量生成文本，并按请求顺序返回解码后的文本和 token ids。"""
         pbar = tqdm(total=len(prompts), desc="Generating", dynamic_ncols=True, disable=not use_tqdm)
         if not isinstance(sampling_params, list):
             sampling_params = [sampling_params] * len(prompts)
