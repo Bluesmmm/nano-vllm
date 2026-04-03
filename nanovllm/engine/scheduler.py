@@ -6,6 +6,7 @@ from nanovllm.engine.block_manager import BlockManager
 
 
 class Scheduler:
+    """管理 waiting/running 序列，并在 prefill 与 decode 阶段之间做批处理调度。"""
 
     def __init__(self, config: Config):
         self.max_num_seqs = config.max_num_seqs
@@ -23,6 +24,12 @@ class Scheduler:
         self.waiting.append(seq)
 
     def schedule(self) -> tuple[list[Sequence], bool]:
+        """
+        选择下一批要送入模型的序列。
+
+        返回值中的 bool 表示本轮是否为 prefill。prefill 会优先消费 waiting 队列，
+        并允许首个序列按 token budget 做 chunked prefill；没有 prefill 任务时才进入 decode。
+        """
         scheduled_seqs = []
         num_batched_tokens = 0
 
@@ -73,12 +80,14 @@ class Scheduler:
         return scheduled_seqs, False
 
     def preempt(self, seq: Sequence):
+        """显存不足时释放序列已有 KV Cache，并放回 waiting 队首等待重新调度。"""
         seq.status = SequenceStatus.WAITING
         seq.is_prefill = True
         self.block_manager.deallocate(seq)
         self.waiting.appendleft(seq)
 
     def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bool):
+        """更新本轮调度后的缓存进度，并在 decode 阶段追加新生成 token。"""
         for seq, token_id in zip(seqs, token_ids):
             self.block_manager.hash_blocks(seq)
             seq.num_cached_tokens += seq.num_scheduled_tokens
